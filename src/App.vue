@@ -270,10 +270,10 @@ function resetHistory() {
   }
 }
 
-// ---------- Drag & Drop ----------
+// ---------- Drag & Drop (Pointer Events: PC mouse + touch 両対応) ----------
 // loc: { kind:'match', court, side:'A'|'B', index } | { kind:'resting', index }
-const dragging = ref(null)
 const dragOverKey = ref(null)
+const ptr = ref(null) // { roundId, fromLoc, ghost, currentKey, startClickTarget }
 
 function locKey(roundId, loc) {
   return loc.kind === 'match'
@@ -281,42 +281,82 @@ function locKey(roundId, loc) {
     : `${roundId}|R|${loc.index}`
 }
 
-function onDragStart(ev, roundId, loc) {
-  dragging.value = { roundId, loc }
-  ev.dataTransfer.effectAllowed = 'move'
-  ev.dataTransfer.setData('text/plain', JSON.stringify({ roundId, loc }))
-  ev.stopPropagation()
-}
-function onDragEnd() {
-  dragging.value = null
-  dragOverKey.value = null
-}
-function onDragOver(ev, roundId, loc) {
-  if (!dragging.value || dragging.value.roundId !== roundId) return
-  ev.preventDefault()
-  ev.dataTransfer.dropEffect = 'move'
-  dragOverKey.value = locKey(roundId, loc)
-}
-function onDragLeave() {
-  dragOverKey.value = null
-}
-function onDrop(ev, roundId, loc) {
-  ev.preventDefault()
-  ev.stopPropagation()
-  let payload = dragging.value
-  if (!payload) {
-    try {
-      payload = JSON.parse(ev.dataTransfer.getData('text/plain'))
-    } catch {}
+function parseLocKey(key) {
+  const parts = key.split('|')
+  // roundId は頭にあるが今回は使わない（フォーマットのみ利用）
+  const kind = parts[parts.length === 5 ? 1 : 1]
+  if (parts[1] === 'M') {
+    return {
+      kind: 'match',
+      court: Number(parts[2]),
+      side: parts[3],
+      index: Number(parts[4]),
+    }
   }
-  dragging.value = null
-  dragOverKey.value = null
-  if (!payload) return
-  if (payload.roundId !== roundId) {
-    alert('同じラウンド内でのみ入れ替えできます')
-    return
+  return { kind: 'resting', index: Number(parts[2]) }
+}
+
+function onPointerDown(ev, roundId, loc, label) {
+  // 主ボタン (左クリック or 単一タッチ) のみ
+  if (ev.button !== undefined && ev.button !== 0) return
+  // スクロールやテキスト選択を止める
+  ev.preventDefault()
+  const ghost = document.createElement('div')
+  ghost.className = 'drag-ghost'
+  ghost.textContent = label
+  Object.assign(ghost.style, {
+    position: 'fixed',
+    left: ev.clientX - 40 + 'px',
+    top: ev.clientY - 18 + 'px',
+    pointerEvents: 'none',
+    zIndex: '10000',
+    padding: '0.25rem 0.6rem',
+    background: '#1565c0',
+    color: '#fff',
+    borderRadius: '6px',
+    fontSize: '0.9rem',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    transform: 'scale(1.05)',
+  })
+  document.body.appendChild(ghost)
+  ptr.value = { roundId, fromLoc: loc, ghost, currentKey: null }
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp, { once: true })
+  window.addEventListener('pointercancel', onPointerUp, { once: true })
+}
+
+function onPointerMove(ev) {
+  const p = ptr.value
+  if (!p) return
+  p.ghost.style.left = ev.clientX - 40 + 'px'
+  p.ghost.style.top = ev.clientY - 18 + 'px'
+  // ghost を一時的に非表示にして下の要素を取得
+  p.ghost.style.display = 'none'
+  const target = document.elementFromPoint(ev.clientX, ev.clientY)
+  p.ghost.style.display = ''
+  const dropEl = target?.closest('[data-drop-key]')
+  if (dropEl && dropEl.getAttribute('data-round-id') === p.roundId) {
+    const k = dropEl.getAttribute('data-drop-key')
+    dragOverKey.value = k
+    p.currentKey = k
+  } else {
+    dragOverKey.value = null
+    p.currentKey = null
   }
-  swapPlayers(roundId, payload.loc, loc)
+}
+
+function onPointerUp() {
+  window.removeEventListener('pointermove', onPointerMove)
+  const p = ptr.value
+  if (!p) return
+  p.ghost.remove()
+  const key = p.currentKey
+  const { roundId, fromLoc } = p
+  ptr.value = null
+  dragOverKey.value = null
+  if (!key) return
+  const toLoc = parseLocKey(key)
+  if (toLoc) swapPlayers(roundId, fromLoc, toLoc)
 }
 
 function getPlayerRef(round, loc) {
@@ -507,32 +547,17 @@ const reversedRounds = computed(() => rounds.value.slice().reverse())
                         dragOverKey ===
                         locKey(r.id, { kind: 'match', court: m.court, side: 'A', index: i }),
                     }"
-                    draggable="true"
-                    @dragstart="
-                      onDragStart($event, r.id, {
-                        kind: 'match',
-                        court: m.court,
-                        side: 'A',
-                        index: i,
-                      })
+                    :data-round-id="r.id"
+                    :data-drop-key="
+                      locKey(r.id, { kind: 'match', court: m.court, side: 'A', index: i })
                     "
-                    @dragend="onDragEnd"
-                    @dragover="
-                      onDragOver($event, r.id, {
+                    @pointerdown="
+                      onPointerDown($event, r.id, {
                         kind: 'match',
                         court: m.court,
                         side: 'A',
                         index: i,
-                      })
-                    "
-                    @dragleave="onDragLeave"
-                    @drop="
-                      onDrop($event, r.id, {
-                        kind: 'match',
-                        court: m.court,
-                        side: 'A',
-                        index: i,
-                      })
+                      }, p.name)
                     "
                     @click.stop
                   >
@@ -560,32 +585,17 @@ const reversedRounds = computed(() => rounds.value.slice().reverse())
                         dragOverKey ===
                         locKey(r.id, { kind: 'match', court: m.court, side: 'B', index: i }),
                     }"
-                    draggable="true"
-                    @dragstart="
-                      onDragStart($event, r.id, {
-                        kind: 'match',
-                        court: m.court,
-                        side: 'B',
-                        index: i,
-                      })
+                    :data-round-id="r.id"
+                    :data-drop-key="
+                      locKey(r.id, { kind: 'match', court: m.court, side: 'B', index: i })
                     "
-                    @dragend="onDragEnd"
-                    @dragover="
-                      onDragOver($event, r.id, {
+                    @pointerdown="
+                      onPointerDown($event, r.id, {
                         kind: 'match',
                         court: m.court,
                         side: 'B',
                         index: i,
-                      })
-                    "
-                    @dragleave="onDragLeave"
-                    @drop="
-                      onDrop($event, r.id, {
-                        kind: 'match',
-                        court: m.court,
-                        side: 'B',
-                        index: i,
-                      })
+                      }, p.name)
                     "
                     @click.stop
                   >
@@ -618,12 +628,9 @@ const reversedRounds = computed(() => rounds.value.slice().reverse())
                 'drop-hover':
                   dragOverKey === locKey(r.id, { kind: 'resting', index: i }),
               }"
-              draggable="true"
-              @dragstart="onDragStart($event, r.id, { kind: 'resting', index: i })"
-              @dragend="onDragEnd"
-              @dragover="onDragOver($event, r.id, { kind: 'resting', index: i })"
-              @dragleave="onDragLeave"
-              @drop="onDrop($event, r.id, { kind: 'resting', index: i })"
+              :data-round-id="r.id"
+              :data-drop-key="locKey(r.id, { kind: 'resting', index: i })"
+              @pointerdown="onPointerDown($event, r.id, { kind: 'resting', index: i }, p.name)"
             >
               ⋮⋮ {{ p.name }}
             </span>
@@ -861,6 +868,9 @@ button:hover {
   border-radius: 5px;
   cursor: grab;
   transition: all 0.12s;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .team-btn .member:hover {
   background: #e8f5e9;
@@ -903,6 +913,9 @@ button:hover {
   padding: 0.15rem 0.6rem;
   cursor: grab;
   transition: all 0.12s;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .rest-chip:hover {
   background: #fff3e0;

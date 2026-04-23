@@ -1,0 +1,65 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+.pnpm-store/
+
+# Build output
+dist
+dist-ssr
+coverage
+*.local
+
+# Environment variables (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# TypeScript
+*.tsbuildinfo
+
+# ESLint / Prettier cache
+.eslintcache
+.prettiercache
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vitest
+__screenshots__/
+
+# Vite
+*.timestamp-*-*.mjs
+
+# Cloudflare / Wrangler (将来使う場合)
+.wrangler/
+.dev.vars
+
+# PWA auto-generated (dev 時のみ。本番は dist に入る)
+dev-dist/
+
+# Misc
+*.bak
+*.tmp

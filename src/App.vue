@@ -180,8 +180,9 @@ function generate() {
     })),
     resting: resting.map((p) => ({ id: p.id, name: p.name })),
   })
+  // reversedRounds で表示しているため、最新ラウンドは先頭の .round-card
   setTimeout(() => {
-    const el = document.querySelector('.round-card:last-child')
+    const el = document.querySelector('.round-card')
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, 50)
 }

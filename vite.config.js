@@ -14,7 +14,7 @@ export default defineConfig({
     vueDevTools(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'pwa.svg'],
+      includeAssets: ['favicon.svg', 'pwa.svg'],
       manifest: {
         name: 'バドミントン ダブルス組み合わせ',
         short_name: 'バドミントン組み合わせ',

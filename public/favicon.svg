@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#0a6b4a"/>
+  <g transform="translate(32 34)">
+    <g fill="#ffffff" stroke="#ffffff" stroke-width="1" stroke-linejoin="round">
+      <polygon points="0,-20 -3,-4 3,-4"/>
+      <polygon points="-14,-14 -5,-2 -2,-4"/>
+      <polygon points="14,-14 5,-2 2,-4"/>
+      <polygon points="-20,0 -5,0 -4,-4"/>
+      <polygon points="20,0 5,0 4,-4"/>
+    </g>
+    <circle r="7" cy="-2" fill="#f9a825" stroke="#e65100" stroke-width="1.5"/>
+  </g>
+</svg>

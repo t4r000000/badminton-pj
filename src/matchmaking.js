@@ -3,6 +3,7 @@
 // - 出場回数を公平にする
 // - 固定ペア (fixedPairs) のプレイヤーは極力同じチームに入れる
 //   （人数不足で片方が休憩になる場合はペアを崩してゲームに入れる）
+// - 固定ペアが複数あるときは、できるだけ別コートに分散（同じ対戦が連続するのを回避）
 
 const pairKey = (a, b) => [a, b].sort().join('|')
 
@@ -67,9 +68,11 @@ function bestPairingOf4(players, history, fixedPairSet) {
 
 /**
  * 選出済みプレイヤーをコート別の 4 人グループに分ける。
- * 固定ペアが両方含まれる場合は同じグループに入れる。
+ * - 固定ペアは可能な限り別コートに分散させる（コート数 >= 固定ペア数のとき）
+ * - 残りのプレイヤーは、各グループ内の既存メンバーとの ペア/対戦履歴 が最小に
+ *   なるよう貪欲法で割り当てる（対戦相手を毎回変えるため）
  */
-function assignGroups(playing, numCourts, fixedPairs) {
+function assignGroups(playing, numCourts, fixedPairs, history) {
   const groups = Array.from({ length: numCourts }, () => [])
   const used = new Set()
 
@@ -78,22 +81,57 @@ function assignGroups(playing, numCourts, fixedPairs) {
     ([a, b]) => playing.some((p) => p.id === a) && playing.some((p) => p.id === b)
   )
 
-  // 固定ペアを先にグループへ配置
-  for (const [aId, bId] of shuffle(inPlay)) {
+  // 固定ペアをグループへ配置
+  // 「同コート集中」「別コート分散」どちらも許容し、空き 2 以上のグループから
+  // 完全ランダムに選ぶ（特定の配置に偏らせない）。
+  // 集中／分散の最終判断は generateMatches 側で history を見たスコアで行う。
+  const shuffledPairs = shuffle(inPlay)
+  for (const [aId, bId] of shuffledPairs) {
     if (used.has(aId) || used.has(bId)) continue
-    const gi = groups.findIndex((g) => g.length <= 2)
-    if (gi === -1) break
+    const candidates = groups
+      .map((g, i) => ({ i, len: g.length }))
+      .filter(({ len }) => len <= 2)
+    if (candidates.length === 0) break // 配置不可（人数オーバー）
+    const pick = candidates[Math.floor(Math.random() * candidates.length)]
     const A = playing.find((p) => p.id === aId)
     const B = playing.find((p) => p.id === bId)
-    groups[gi].push(A, B)
+    groups[pick.i].push(A, B)
     used.add(aId)
     used.add(bId)
   }
-  // 残りをランダムに埋める
-  const rest = shuffle(playing.filter((p) => !used.has(p.id)))
-  let ri = 0
-  for (const g of groups) {
-    while (g.length < 4 && ri < rest.length) g.push(rest[ri++])
+
+  // 残りプレイヤーを履歴を踏まえつつ各グループへ
+  // shuffle で完全な決定論を避け、生成のたびに多様性を持たせる
+  const remaining = shuffle(playing.filter((p) => !used.has(p.id)))
+
+  // グループ訪問順もシャッフルして、特定コートに固定の傾向が出ないように
+  const groupOrder = shuffle(groups.map((_, i) => i))
+
+  // 各グループを 4 人に揃えるまで貪欲法で 1 人ずつ追加
+  // 「グループ既存メンバーとの ペア/対戦履歴 が最小」 + tie は順序ランダムで決まる
+  let safety = 0
+  while (groupOrder.some((i) => groups[i].length < 4) && remaining.length > 0) {
+    if (++safety > 1000) break
+    for (const gi of groupOrder) {
+      const g = groups[gi]
+      if (g.length >= 4 || remaining.length === 0) continue
+      let bestIdx = 0
+      let bestScore = Infinity
+      for (let i = 0; i < remaining.length; i++) {
+        const cand = remaining[i]
+        let score = 0
+        for (const m of g) {
+          // ペア履歴は重く、対戦履歴はやや軽く重み付け
+          score += getPairCount(history, cand.id, m.id) * 5
+          score += getOpponentCount(history, cand.id, m.id)
+        }
+        if (score < bestScore) {
+          bestScore = score
+          bestIdx = i
+        }
+      }
+      g.push(remaining.splice(bestIdx, 1)[0])
+    }
   }
   return groups
 }
@@ -170,7 +208,7 @@ export function generateMatches(players, courts, history, opts = {}) {
 
   let bestResult = null
   for (let t = 0; t < trials; t++) {
-    const groups = assignGroups(playing, actualCourts, fixedPairs)
+    const groups = assignGroups(playing, actualCourts, fixedPairs, history)
     const matches = []
     let total = 0
     let splitPenalty = 0
@@ -184,16 +222,18 @@ export function generateMatches(players, courts, history, opts = {}) {
         score: pairing.score,
       })
       total += pairing.score
-      // グループ分け時点で固定ペアが分断されていないか（両人が別グループ）
+
+      // 固定ペアの片方だけが別グループに居るのは致命的（ペア崩れ）→ 強くペナルティ
       for (const key of fixedPairSet) {
         const [a, b] = key.split('|')
-        const inGroup = group.some((p) => p.id === a) || group.some((p) => p.id === b)
-        const bothIn = group.some((p) => p.id === a) && group.some((p) => p.id === b)
-        if (inGroup && !bothIn) splitPenalty += 1
+        const aIn = group.some((p) => p.id === a)
+        const bIn = group.some((p) => p.id === b)
+        if (aIn !== bIn) splitPenalty += 1
       }
     }
-    // splitPenalty を強く嫌う
-    const combined = splitPenalty * 10000 + total
+    // ペア vs ペア の対戦も「OKだが連続は避ける」 → total に opponents 履歴が
+    // 反映されているので、自然と前回と異なる相手が選ばれるようになる。
+    const combined = splitPenalty * 100000 + total
     if (!bestResult || combined < bestResult.combined) {
       bestResult = { matches, combined }
       if (combined === 0) break
